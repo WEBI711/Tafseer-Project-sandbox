@@ -116,6 +116,13 @@ export default function Workspace() {
     [],
   );
 
+  /** Re-fetches the open surah so reader edits made anywhere show up here. */
+  const refreshSurah = useCallback(async () => {
+    if (!surah) return;
+    const res = await fetch(`/api/surah/${surah.number}`);
+    if (res.ok) setSurah(await res.json());
+  }, [surah]);
+
   const openDoc = useCallback((docId: string) => {
     if (!docsRef.current[docId]) return;
     setView({ kind: "query", docId });
@@ -286,6 +293,7 @@ export default function Workspace() {
         tree={tree}
         onToggleLeft={() => setLeftHidden((v) => !v)}
         onToggleRight={() => setRightHidden((v) => !v)}
+        onRefreshSurah={refreshSurah}
       />
 
       <ChatPanel

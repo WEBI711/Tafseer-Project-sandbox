@@ -1,9 +1,22 @@
 "use client";
 
-import type { RefObject } from "react";
+import { useCallback, useEffect, useState, type RefObject } from "react";
+import { EDITOR_HEADER, type Editor } from "@/lib/editor";
 import type { DocBlock, ResponseDoc, SurahView, TreeSurah } from "@/lib/types";
 import { workLabel } from "./Workspace";
 import CommentaryText from "./CommentaryText";
+
+const EDITOR_STORAGE_KEY = "tafseer.editor";
+
+/** Reads the signed-in editor from localStorage; null when signed out. */
+function loadEditor(): Editor | null {
+  try {
+    const saved = JSON.parse(localStorage.getItem(EDITOR_STORAGE_KEY) ?? "null");
+    return saved?.name && saved?.key ? saved : null;
+  } catch {
+    return null;
+  }
+}
 
 type Props = {
   mode: "reader" | "query";
@@ -13,6 +26,7 @@ type Props = {
   tree: TreeSurah[];
   onToggleLeft: () => void;
   onToggleRight: () => void;
+  onRefreshSurah: () => void;
 };
 
 export default function Reader({
@@ -23,7 +37,39 @@ export default function Reader({
   tree,
   onToggleLeft,
   onToggleRight,
+  onRefreshSurah,
 }: Props) {
+  const [editor, setEditor] = useState<Editor | null>(null);
+  useEffect(() => setEditor(loadEditor()), []);
+
+  /** Asks for a name and the shared key; affordances only appear if the
+      server accepts the key. */
+  const signIn = useCallback(async () => {
+    const name = window.prompt("Editor name (recorded with each edit)")?.trim();
+    if (!name) return;
+    const key = window.prompt("Editor key") ?? "";
+    const res = await fetch("/api/editor", { headers: { [EDITOR_HEADER]: key } });
+    if (!(await res.json()).authorized) {
+      window.alert("That key is not authorized.");
+      return;
+    }
+    const next = { name, key };
+    try {
+      localStorage.setItem(EDITOR_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      /* private mode — the editor stays signed in for this session only */
+    }
+    setEditor(next);
+  }, []);
+
+  const signOut = useCallback(() => {
+    try {
+      localStorage.removeItem(EDITOR_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+    setEditor(null);
+  }, []);
   const crumb =
     mode === "query" && doc
       ? {
@@ -45,6 +91,15 @@ export default function Reader({
       <div className="top">
         <span className="crumb">{crumb.label}</span>
         <span style={{ display: "flex", gap: 8 }}>
+          {mode === "reader" && (
+            <button
+              className={`icon-btn${editor ? " active" : ""}`}
+              onClick={editor ? signOut : signIn}
+              title={editor ? `Editing as ${editor.name} — click to sign out` : "Sign in as editor"}
+            >
+              {editor ? "✎" : "🔒"}
+            </button>
+          )}
           <button className="icon-btn" onClick={onToggleLeft} title="Toggle explorer">
             ☰
           </button>
@@ -57,7 +112,7 @@ export default function Reader({
       <div className="wrap">
         {mode === "query"
           ? doc && <ResponseDocument doc={doc} tree={tree} />
-          : surah && <SurahDocument surah={surah} />}
+          : surah && <SurahDocument surah={surah} editor={editor} onRefresh={onRefreshSurah} />}
       </div>
     </main>
   );
@@ -94,7 +149,15 @@ function CommentaryRows({ rows, labelRuns }: { rows: Row[]; labelRuns?: boolean 
 
 /* ---------------- reader mode: the source document, block by block ---------------- */
 
-function SurahDocument({ surah }: { surah: SurahView }) {
+function SurahDocument({
+  surah,
+  editor,
+  onRefresh,
+}: {
+  surah: SurahView;
+  editor: Editor | null;
+  onRefresh: () => void;
+}) {
   const multi = surah.documents.length > 1;
   return (
     <>
@@ -103,14 +166,29 @@ function SurahDocument({ surah }: { surah: SurahView }) {
           {/* app chrome, not document text: keep attribution when a surah is
               covered by more than one source file */}
           {multi && <div className="doc-source">Source · {workLabel(doc.source_file)}</div>}
-          <DocumentBody blocks={doc.blocks} />
+          <DocumentBody
+            blocks={doc.blocks}
+            sourceFile={doc.source_file}
+            editor={editor}
+            onRefresh={onRefresh}
+          />
         </section>
       ))}
     </>
   );
 }
 
-function DocumentBody({ blocks }: { blocks: DocBlock[] }) {
+function DocumentBody({
+  blocks,
+  sourceFile,
+  editor,
+  onRefresh,
+}: {
+  blocks: DocBlock[];
+  sourceFile: string;
+  editor: Editor | null;
+  onRefresh: () => void;
+}) {
   const out: React.ReactNode[] = [];
   let list: DocBlock[] = [];
 
@@ -120,7 +198,9 @@ function DocumentBody({ blocks }: { blocks: DocBlock[] }) {
       <ul className="doc-list" key={`list-${list[0].ord}`}>
         {list.map((b) => (
           <li key={b.ord} data-kind={b.kind} data-ord={b.ord}>
-            {b.text}
+            <EditableBlock block={b} sourceFile={sourceFile} editor={editor} onRefresh={onRefresh}>
+              {b.text}
+            </EditableBlock>
           </li>
         ))}
       </ul>,
@@ -134,7 +214,11 @@ function DocumentBody({ blocks }: { blocks: DocBlock[] }) {
       continue;
     }
     flushList();
-    out.push(<BlockView block={b} key={b.ord} />);
+    out.push(
+      <EditableBlock key={b.ord} block={b} sourceFile={sourceFile} editor={editor} onRefresh={onRefresh}>
+        <BlockView block={b} />
+      </EditableBlock>,
+    );
     // section headings take the demo's ornamental rule underneath
     if (b.kind === "section_heading") {
       out.push(
@@ -146,6 +230,97 @@ function DocumentBody({ blocks }: { blocks: DocBlock[] }) {
   }
   flushList();
   return <>{out}</>;
+}
+
+/**
+ * Inline edit affordance: for the signed-in editor each block gets a hover
+ * pencil that turns it into a textarea. Saving stores the new text on the
+ * server and refreshes the view, so all clients pick the edit up.
+ */
+function EditableBlock({
+  block,
+  sourceFile,
+  editor,
+  onRefresh,
+  children,
+}: {
+  block: DocBlock;
+  sourceFile: string;
+  editor: Editor | null;
+  onRefresh: () => void;
+  children: React.ReactNode;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(block.text);
+  const [busy, setBusy] = useState(false);
+
+  // tables store a JSON grid, not prose — leave them read-only
+  if (!editor || block.kind === "table") return <>{children}</>;
+
+  const save = async () => {
+    const after = draft.trim();
+    if (!after || after === block.text || busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/doc-block", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", [EDITOR_HEADER]: editor.key },
+        body: JSON.stringify({
+          sourceFile,
+          kind: block.kind,
+          text: block.text,
+          after,
+          editor: editor.name,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      setEditing(false);
+      onRefresh();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Edit failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={`editable${editing ? " editing" : ""}`}>
+      {children}
+      {editing ? (
+        <span className="edit-actions">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={Math.min(draft.split("\n").length + 1, 10)}
+            autoFocus
+          />
+          <button className="edit-act" onClick={save} disabled={busy}>
+            Save
+          </button>
+          <button
+            className="edit-act"
+            onClick={() => {
+              setDraft(block.text);
+              setEditing(false);
+            }}
+          >
+            Cancel
+          </button>
+        </span>
+      ) : (
+        <button
+          className="edit-btn"
+          onClick={() => {
+            setDraft(block.text);
+            setEditing(true);
+          }}
+          title="Edit text"
+        >
+          ✎
+        </button>
+      )}
+    </div>
+  );
 }
 
 function BlockView({ block }: { block: DocBlock }) {
