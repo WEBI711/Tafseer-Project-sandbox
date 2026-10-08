@@ -132,6 +132,7 @@ export function startSpeaking(
     if (!res.ok) throw new Error(`tts ${res.status}`);
     const blob = await res.blob();
     if (stopped) return;
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
     objectUrl = URL.createObjectURL(blob);
     audio = new Audio(objectUrl);
     audio.onended = advance;
