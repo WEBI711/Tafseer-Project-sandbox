@@ -44,8 +44,12 @@ export default function ChatPanel({
   const [draft, setDraft] = useState("");
   const [recentOpen, setRecentOpen] = useState(false);
   const [listening, setListening] = useState(false);
+  // Speech exists only in the browser, so wait until after hydration before
+  // rendering the mic button — otherwise the server HTML won't match.
+  const [mounted, setMounted] = useState(false);
   const dictationRef = useRef<Dictation | null>(null);
 
+  useEffect(() => setMounted(true), []);
   useEffect(() => () => dictationRef.current?.stop(), []);
   const last = messages[messages.length - 1];
   const showSuggestions = Boolean(last && last.role === "a" && !last.streaming && currentDoc);
@@ -216,7 +220,7 @@ export default function ChatPanel({
             onKeyDown={(e) => e.key === "Enter" && submit()}
             placeholder={currentDoc ? "Refine this, or ask something new…" : "Ask about the tafseer…"}
           />
-          {dictationSupported() && (
+          {mounted && dictationSupported() && (
             <button
               className={`mic${listening ? " listening" : ""}`}
               onClick={toggleDictation}

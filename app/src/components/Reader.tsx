@@ -191,13 +191,6 @@ function BlockView({ block }: { block: DocBlock }) {
         </p>
       );
     case "translation":
-      if (!speakSupported()) {
-        return (
-          <p className="translation" id={id} {...meta}>
-            {block.text}
-          </p>
-        );
-      }
       return (
         <div className="trans-row" id={id} {...meta}>
           <SpeakButton text={block.text} />
@@ -364,7 +357,11 @@ function ResponseDocument({ doc, tree }: { doc: ResponseDoc; tree: TreeSurah[] }
 /* ---------------- read-aloud (TTS) ---------------- */
 
 function SpeakButton({ text }: { text: string }) {
+  // Speech exists only in the browser, so wait until after hydration before
+  // rendering the button — otherwise the server HTML won't match.
+  const [mounted, setMounted] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  useEffect(() => setMounted(true), []);
   useEffect(() => () => stopSpeaking(), []);
 
   const toggle = () => {
@@ -376,6 +373,8 @@ function SpeakButton({ text }: { text: string }) {
     speakText(text, () => setSpeaking(false));
     setSpeaking(true);
   };
+
+  if (!mounted || !speakSupported()) return null;
 
   return (
     <button
@@ -416,13 +415,11 @@ function AyahBlock({
         <div className="vhead">
           <span className="ref">{ref_}</span>
           {score !== undefined && <span className="score">{score.toFixed(2)}</span>}
-          {speakSupported() && (
-            <SpeakButton
-              text={[translation, ...commentary.map((r) => r.content)]
-                .filter(Boolean)
-                .join(" ")}
-            />
-          )}
+          <SpeakButton
+            text={[translation, ...commentary.map((r) => r.content)]
+              .filter(Boolean)
+              .join(" ")}
+          />
         </div>
       )}
       <div className="vrow">
