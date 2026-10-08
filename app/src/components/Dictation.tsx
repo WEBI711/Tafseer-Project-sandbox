@@ -145,6 +145,7 @@ export default function Dictation({
       }
       const section = secs[i];
       speakerRef.current?.stop();
+      speakerRef.current = null;
       setPlaying(true);
       setPaused(false);
       setActiveSection(section);
@@ -154,6 +155,7 @@ export default function Dictation({
       const segments: SpeechSegment[] = section.blocks
         .filter((_, i) => !(skipHeading && i === 0))
         .map((b) => ({ text: b.text, lang: b.lang }));
+      let ended = false;
       const speaker = startSpeaking(segments, {
         rate: rateRef.current,
         onSegment: (bi) => {
@@ -161,13 +163,19 @@ export default function Dictation({
           if (block) highlight(block, section.docIndex);
         },
         onEnd: () => {
+          ended = true;
           speakerRef.current = null;
           if (keepRef.current && i + 1 < sectionsRef.current.length) playSection(i + 1);
           else stop();
         },
       });
-      speakerRef.current = speaker;
-      if (!speaker) stop();
+      if (!speaker) {
+        stop();
+        return;
+      }
+      // an empty queue fires onEnd synchronously and may already have started
+      // the next section — only install our speaker when it did not
+      if (!ended) speakerRef.current = speaker;
     },
     [highlight, stop],
   );
