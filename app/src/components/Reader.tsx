@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { RefObject } from "react";
 import type { DocBlock, ResponseDoc, SurahView, TreeSurah } from "@/lib/types";
+import { speakSupported, speakText, stopSpeaking } from "@/lib/speech";
 import { workLabel } from "./Workspace";
 import CommentaryText from "./CommentaryText";
 
@@ -189,10 +191,18 @@ function BlockView({ block }: { block: DocBlock }) {
         </p>
       );
     case "translation":
+      if (!speakSupported()) {
+        return (
+          <p className="translation" id={id} {...meta}>
+            {block.text}
+          </p>
+        );
+      }
       return (
-        <p className="translation" id={id} {...meta}>
-          {block.text}
-        </p>
+        <div className="trans-row" id={id} {...meta}>
+          <SpeakButton text={block.text} />
+          <p className="translation">{block.text}</p>
+        </div>
       );
     case "table":
       return <TableBlock block={block} id={id} meta={meta} />;
@@ -351,6 +361,33 @@ function ResponseDocument({ doc, tree }: { doc: ResponseDoc; tree: TreeSurah[] }
   );
 }
 
+/* ---------------- read-aloud (TTS) ---------------- */
+
+function SpeakButton({ text }: { text: string }) {
+  const [speaking, setSpeaking] = useState(false);
+  useEffect(() => () => stopSpeaking(), []);
+
+  const toggle = () => {
+    if (speaking) {
+      stopSpeaking();
+      setSpeaking(false);
+      return;
+    }
+    speakText(text, () => setSpeaking(false));
+    setSpeaking(true);
+  };
+
+  return (
+    <button
+      className={`icon-btn speak${speaking ? " on" : ""}`}
+      onClick={toggle}
+      title={speaking ? "Stop reading aloud" : "Read aloud"}
+    >
+      {speaking ? "⏹" : "🔊"}
+    </button>
+  );
+}
+
 /* ---------------- shared ayah block ---------------- */
 
 function AyahBlock({
@@ -379,6 +416,13 @@ function AyahBlock({
         <div className="vhead">
           <span className="ref">{ref_}</span>
           {score !== undefined && <span className="score">{score.toFixed(2)}</span>}
+          {speakSupported() && (
+            <SpeakButton
+              text={[translation, ...commentary.map((r) => r.content)]
+                .filter(Boolean)
+                .join(" ")}
+            />
+          )}
         </div>
       )}
       <div className="vrow">
