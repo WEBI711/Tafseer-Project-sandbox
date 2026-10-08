@@ -1,4 +1,5 @@
 import { query } from "./db";
+import { latestEdits } from "./edits";
 import { embed } from "./llm";
 import type {
   DocDocument,
@@ -140,6 +141,18 @@ export async function surahView(number: number): Promise<SurahView | null> {
     }
     return { source_file: part.source_file, juz: part.juz, blocks };
   });
+
+  // Authorized edits override the ingested text at read time, keyed by the
+  // block's (source_file, ord) identity.
+  const edits = await latestEdits();
+  if (edits.size > 0) {
+    for (const doc of documents) {
+      for (const b of doc.blocks) {
+        const edited = edits.get(`${doc.source_file}:${b.ord}`);
+        if (edited !== undefined) b.text = edited;
+      }
+    }
+  }
 
   const first = parts[0];
   return { number, name_en: first.name_en ?? "", juz: first.juz, documents };

@@ -13,6 +13,9 @@ type Props = {
   doc: ResponseDoc | null;
   ref: RefObject<HTMLElement | null>;
   tree: TreeSurah[];
+  editorMode: boolean;
+  onToggleEditor: () => void;
+  onSaveBlock: (number: number, sourceFile: string, ord: number, text: string) => Promise<boolean>;
   onToggleLeft: () => void;
   onToggleRight: () => void;
 };
@@ -23,6 +26,9 @@ export default function Reader({
   doc,
   ref,
   tree,
+  editorMode,
+  onToggleEditor,
+  onSaveBlock,
   onToggleLeft,
   onToggleRight,
 }: Props) {
@@ -47,6 +53,13 @@ export default function Reader({
       <div className="top">
         <span className="crumb">{crumb.label}</span>
         <span className="top-actions">
+          <button
+            className={`icon-btn${editorMode ? " on" : ""}`}
+            onClick={onToggleEditor}
+            title="Toggle text editing"
+          >
+            ✎
+          </button>
           <button className="icon-btn" onClick={onToggleLeft} title="Toggle explorer">
             ☰
           </button>
@@ -59,7 +72,15 @@ export default function Reader({
       <div className="wrap">
         {mode === "query"
           ? doc && <ResponseDocument doc={doc} tree={tree} />
-          : surah && <SurahDocument surah={surah} />}
+          : surah && (
+              <SurahDocument
+                surah={surah}
+                canEdit={editorMode}
+                onSave={(sourceFile, ord, text) =>
+                  onSaveBlock(surah.number, sourceFile, ord, text)
+                }
+              />
+            )}
       </div>
     </main>
   );
@@ -96,7 +117,15 @@ function CommentaryRows({ rows, labelRuns }: { rows: Row[]; labelRuns?: boolean 
 
 /* ---------------- reader mode: the source document, block by block ---------------- */
 
-function SurahDocument({ surah }: { surah: SurahView }) {
+function SurahDocument({
+  surah,
+  canEdit,
+  onSave,
+}: {
+  surah: SurahView;
+  canEdit: boolean;
+  onSave: (sourceFile: string, ord: number, text: string) => Promise<boolean>;
+}) {
   const multi = surah.documents.length > 1;
   return (
     <>
@@ -105,24 +134,53 @@ function SurahDocument({ surah }: { surah: SurahView }) {
           {/* app chrome, not document text: keep attribution when a surah is
               covered by more than one source file */}
           {multi && <div className="doc-source">Source · {workLabel(doc.source_file)}</div>}
-          <DocumentBody blocks={doc.blocks} />
+          <DocumentBody
+            blocks={doc.blocks}
+            onSave={canEdit ? (ord, text) => onSave(doc.source_file, ord, text) : undefined}
+          />
         </section>
       ))}
     </>
   );
 }
 
-function DocumentBody({ blocks }: { blocks: DocBlock[] }) {
+function DocumentBody({
+  blocks,
+  onSave,
+}: {
+  blocks: DocBlock[];
+  onSave?: (ord: number, text: string) => Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState<number | null>(null);
   const out: React.ReactNode[] = [];
   let list: DocBlock[] = [];
+
+  const editBtn = (b: DocBlock) =>
+    onSave && b.kind !== "table" ? (
+      <button className="edit-btn" onClick={() => setEditing(b.ord)} title="Edit text">
+        ✎
+      </button>
+    ) : null;
 
   const flushList = () => {
     if (list.length === 0) return;
     out.push(
       <ul className="doc-list" key={`list-${list[0].ord}`}>
         {list.map((b) => (
-          <li key={b.ord} data-kind={b.kind} data-ord={b.ord}>
-            {b.text}
+          <li key={b.ord} data-kind={b.kind} data-ord={b.ord} className="block-wrap">
+            {editing === b.ord && onSave ? (
+              <EditBlock
+                initial={b.text}
+                onCancel={() => setEditing(null)}
+                onSave={async (text) => {
+                  const ok = await onSave(b.ord, text);
+                  if (ok) setEditing(null);
+                }}
+              />
+            ) : (
+              b.text
+            )}
+            {editing !== b.ord && editBtn(b)}
           </li>
         ))}
       </ul>,
@@ -136,7 +194,23 @@ function DocumentBody({ blocks }: { blocks: DocBlock[] }) {
       continue;
     }
     flushList();
-    out.push(<BlockView block={b} key={b.ord} />);
+    out.push(
+      <div className="block-wrap" key={b.ord}>
+        {editing === b.ord && onSave ? (
+          <EditBlock
+            initial={b.text}
+            onCancel={() => setEditing(null)}
+            onSave={async (text) => {
+                  const ok = await onSave(b.ord, text);
+                  if (ok) setEditing(null);
+                }}
+          />
+        ) : (
+          <BlockView block={b} />
+        )}
+        {editing !== b.ord && editBtn(b)}
+      </div>,
+    );
     // section headings take the demo's ornamental rule underneath
     if (b.kind === "section_heading") {
       out.push(
@@ -148,6 +222,46 @@ function DocumentBody({ blocks }: { blocks: DocBlock[] }) {
   }
   flushList();
   return <>{out}</>;
+}
+
+/** Inline editor for one block: textarea plus save/cancel, in place of the text. */
+function EditBlock({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  onSave: (text: string) => Promise<unknown>;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState(initial);
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <div className="block-edit">
+      <textarea
+        value={draft}
+        rows={Math.max(3, Math.ceil(draft.length / 80))}
+        autoFocus
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      <span className="block-edit-actions">
+        <button
+          disabled={saving || draft === initial}
+          onClick={async () => {
+            setSaving(true);
+            await onSave(draft);
+            setSaving(false);
+          }}
+        >
+          Save
+        </button>
+        <button disabled={saving} onClick={onCancel}>
+          Cancel
+        </button>
+      </span>
+    </div>
+  );
 }
 
 function BlockView({ block }: { block: DocBlock }) {

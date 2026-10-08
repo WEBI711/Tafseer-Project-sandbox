@@ -16,6 +16,7 @@ export type RecentQuery = { id: string; query: string; docId: string };
 
 const RECENT_KEY = "tafseer.recent";
 const CONVERSATION_KEY = "tafseer.conversation";
+const EDITOR_KEY = "tafseer.editor";
 
 /** The durable conversation id this browser talks to; empty until the agent mints one. */
 function conversationId(): string | undefined {
@@ -48,6 +49,9 @@ export default function Workspace() {
   const [busy, setBusy] = useState(false);
   const [leftHidden, setLeftHidden] = useState(false);
   const [rightHidden, setRightHidden] = useState(false);
+  // Editor mode: only readers holding the shared editor token may save text
+  // edits; the server is the authority, this flag just shows the affordance.
+  const [editorMode, setEditorMode] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["juz:1"]));
 
   // On phones the three columns cannot fit: the panels become off-canvas
@@ -58,7 +62,64 @@ export default function Workspace() {
       setLeftHidden(true);
       setRightHidden(true);
     }
+    try {
+      setEditorMode(Boolean(localStorage.getItem(EDITOR_KEY)));
+    } catch {
+      /* private mode — editor starts off */
+    }
   }, []);
+
+  const toggleEditor = useCallback(() => {
+    if (editorMode) {
+      setEditorMode(false);
+      return;
+    }
+    let token = "";
+    try {
+      token = localStorage.getItem(EDITOR_KEY) ?? "";
+    } catch {
+      /* private mode — ask every time */
+    }
+    token = window.prompt("Editor access token:", token) ?? "";
+    if (!token) return;
+    try {
+      localStorage.setItem(EDITOR_KEY, token);
+    } catch {
+      /* private mode — token kept for this session only */
+    }
+    setEditorMode(true);
+  }, [editorMode]);
+
+  /** Saves one block edit, then refetches the surah so the change shows. */
+  const saveBlock = useCallback(
+    async (number: number, sourceFile: string, ord: number, text: string) => {
+      let token = "";
+      try {
+        token = localStorage.getItem(EDITOR_KEY) ?? "";
+      } catch {
+        /* no stored token — the server will reject */
+      }
+      const res = await fetch(`/api/surah/${number}/block`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ source_file: sourceFile, ord, text }),
+      });
+      if (res.status === 403) {
+        alert("Not authorized to edit.");
+        return false;
+      }
+      if (!res.ok) {
+        alert("Saving the edit failed.");
+        return false;
+      }
+      // Refresh path: refetch here, and every other client picks up the edit
+      // on its next fetch of the surah.
+      const refreshed = await fetch(`/api/surah/${number}`);
+      if (refreshed.ok) setSurah(await refreshed.json());
+      return true;
+    },
+    [],
+  );
 
   const docsRef = useRef(docs);
   docsRef.current = docs;
@@ -295,6 +356,9 @@ export default function Workspace() {
         doc={currentDoc}
         ref={mainRef}
         tree={tree}
+        editorMode={editorMode}
+        onToggleEditor={toggleEditor}
+        onSaveBlock={saveBlock}
         onToggleLeft={() => setLeftHidden((v) => !v)}
         onToggleRight={() => setRightHidden((v) => !v)}
       />
