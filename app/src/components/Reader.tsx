@@ -201,9 +201,9 @@ function DocumentBody({
             initial={b.text}
             onCancel={() => setEditing(null)}
             onSave={async (text) => {
-                  const ok = await onSave(b.ord, text);
-                  if (ok) setEditing(null);
-                }}
+              const ok = await onSave(b.ord, text);
+              if (ok) setEditing(null);
+            }}
           />
         ) : (
           <BlockView block={b} />
