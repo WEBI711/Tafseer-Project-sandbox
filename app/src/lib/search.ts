@@ -141,13 +141,12 @@ export async function surahView(number: number): Promise<SurahView | null> {
     return { source_file: part.source_file, juz: part.juz, blocks };
   });
 
-  // Reader edits: audited doc_block text changes overlay the derived blocks,
-  // in edit order — every client's next fetch shows the current text.
+  // Reader edits: audited text changes overlay the derived blocks, in edit
+  // order — every client's next fetch shows the current text.
   const edits = await query<{ source_file: string; text_before: string; text_after: string }>(
-    `SELECT db.source_file, e.text_before, e.text_after
-     FROM doc_block_edit e JOIN doc_block db ON db.id = e.block_id
-     WHERE db.source_file = ANY($1)
-     ORDER BY e.edited_at`,
+    `SELECT source_file, text_before, text_after FROM doc_block_edit
+     WHERE source_file = ANY($1)
+     ORDER BY edited_at`,
     [parts.map((p) => p.source_file)],
   );
   for (const e of edits) {
