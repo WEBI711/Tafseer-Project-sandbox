@@ -1,6 +1,7 @@
 "use client";
 
-import type { TreeSurah } from "@/lib/types";
+import { useEffect, useRef, useState } from "react";
+import type { TakeawaysView, TreeSurah } from "@/lib/types";
 
 type Props = {
   tree: TreeSurah[];
@@ -19,6 +20,39 @@ export default function Explorer({
   onOpenSurah,
   onCollapse,
 }: Props) {
+  // Takeaways panels are local to the explorer: lazily fetched on first
+  // open, then cached, keyed per juz part (a surah that spans juz has a
+  // recap per part). `missing` marks surahs with no takeaways at all.
+  const [recaps, setRecaps] = useState<Record<string, TakeawaysView>>({});
+  const [missing, setMissing] = useState<Set<string>>(new Set());
+  const [openTakeaways, setOpenTakeaways] = useState<Set<string>>(new Set());
+  const requested = useRef(new Set<string>());
+
+  const toggleTakeaways = (key: string) => {
+    setOpenTakeaways((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // Fetch once per open panel; 404 means the surah has no takeaways yet.
+  useEffect(() => {
+    for (const key of openTakeaways) {
+      if (requested.current.has(key) || recaps[key] || missing.has(key)) continue;
+      requested.current.add(key);
+      const surah = Number(key.split(":")[2]);
+      fetch(`/api/takeaways/${surah}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data: TakeawaysView | null) => {
+          if (data) setRecaps((prev) => ({ ...prev, [key]: data }));
+          else setMissing((prev) => new Set(prev).add(key));
+        })
+        .catch(() => requested.current.delete(key));
+    }
+  }, [openTakeaways, recaps, missing]);
+
   const juzGroups = tree.reduce<Record<number, TreeSurah[]>>((acc, s) => {
     (acc[s.juz] ??= []).push(s);
     return acc;
@@ -72,6 +106,20 @@ export default function Explorer({
                         <small>{s.ayat}</small>
                       </div>
                       <div className="kids">
+                        <button
+                          className="item sub"
+                          onClick={() => toggleTakeaways(`takeaways:${juz}:${s.number}`)}
+                        >
+                          <span>Key takeaways</span>
+                          <small>✦</small>
+                        </button>
+                        {openTakeaways.has(`takeaways:${juz}:${s.number}`) && (
+                          <TakeawaysPanel
+                            view={recaps[`takeaways:${juz}:${s.number}`]}
+                            missing={missing.has(`takeaways:${juz}:${s.number}`)}
+                            juz={Number(juz)}
+                          />
+                        )}
                         {s.sections.map((sec) => (
                           <button
                             key={sec.id}
@@ -104,6 +152,38 @@ export default function Explorer({
         {tree.length === 0 && <p className="hint">Loading the tree…</p>}
       </div>
     </aside>
+  );
+}
+
+/**
+ * The author's own end-of-part recap ("MY KEY TAKEAWAYS"), shown in place in
+ * the tree. Fixed content — read straight from the ingested recap table.
+ */
+function TakeawaysPanel({
+  view,
+  missing,
+  juz,
+}: {
+  view?: TakeawaysView;
+  missing: boolean;
+  juz: number;
+}) {
+  if (!view) return <p className="hint">{missing ? "No takeaways in this juz yet." : "Loading takeaways…"}</p>;
+  const mine = view.recaps.filter((r) => r.juz === juz);
+  if (mine.length === 0) return <p className="hint">No takeaways in this juz yet.</p>;
+  return (
+    <div className="takeaways">
+      {mine.map((r, i) => (
+        <div key={i}>
+          {r.title && <strong>{titleCase(r.title)}</strong>}
+          {r.items.map((it, j) => (
+            <p key={j} className={it.kind === "list_item" ? "li" : undefined}>
+              {it.text}
+            </p>
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -61,6 +61,17 @@ export type SurahView = {
   documents: DocDocument[];
 };
 
+/** The author's end-of-part takeaways ("MY KEY TAKEAWAYS"), as ingested. */
+export type TakeawaysView = {
+  surah: number;
+  recaps: {
+    juz: number;
+    source_file: string;
+    title: string | null;
+    items: { kind: string; text: string }[];
+  }[];
+};
+
 export type AyahBlock = {
   number: number;
   text_ar: string | null;

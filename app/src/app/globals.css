@@ -66,6 +66,14 @@ button.juz.queries{background:0;border:0;text-align:left;width:100%;cursor:point
 .item.on{color:var(--emerald);background:var(--emerald-tint-select)}
 .item.q{font-style:italic;font-size:14.5px}
 .hint{font-size:12.5px;color:var(--ink-faint);padding:6px 10px;font-family:var(--f-ui)}
+.takeaways{margin:0 10px 8px 24px;padding:8px 10px;border-left:2px solid var(--emerald-soft);
+           font-size:13.5px;color:var(--ink-soft)}
+.takeaways strong{display:block;font-size:11px;letter-spacing:.15em;text-transform:uppercase;
+                  color:var(--emerald);margin-bottom:6px}
+.takeaways p{margin:0 0 8px;line-height:1.5}
+.takeaways p:last-child{margin-bottom:0}
+.takeaways p.li{padding-left:12px;text-indent:-12px}
+.takeaways p.li::before{content:"· "}
 
 /* ---------- reader (center) ---------- */
 .main{overflow-y:auto;min-width:0}

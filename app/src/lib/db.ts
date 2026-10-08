@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import type { TreeSurah } from "./types";
+import type { TakeawaysView, TreeSurah } from "./types";
 
 // DB is the contract between the Python ingestion and this app (PLAN.md).
 const pool = new Pool({
@@ -67,4 +67,33 @@ export async function tree(): Promise<TreeSurah[]> {
     });
   }
   return out;
+}
+
+/** The author's "MY KEY TAKEAWAYS" blocks for one surah, in reading order. */
+export async function takeaways(number: number): Promise<TakeawaysView | null> {
+  const rows = await query<{
+    juz: number;
+    source_file: string;
+    ord: number;
+    title: string | null;
+    items: { kind: string; text: string }[];
+  }>(
+    `SELECT j.number AS juz, p.source_file, r.ord, r.title, r.items
+     FROM recap r
+     JOIN part p ON p.id = r.part_id
+     JOIN juz j ON j.id = p.juz_id
+     WHERE p.surah_number = $1
+     ORDER BY j.number, p.ord, r.ord`,
+    [number],
+  );
+  if (rows.length === 0) return null;
+  return {
+    surah: number,
+    recaps: rows.map((r) => ({
+      juz: r.juz,
+      source_file: r.source_file,
+      title: r.title,
+      items: r.items ?? [],
+    })),
+  };
 }
