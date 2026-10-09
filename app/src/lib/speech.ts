@@ -152,15 +152,11 @@ export function startSpeaking(
       await audio.play();
       opts.onLoading?.(false);
       // Start the next chunk's fetch now so it is ready when this one ends.
+      // Stored raw: fetchChunk already marks the promise handled, and the
+      // await in playFromServer reports the failure when the chunk is reached.
       const next = queue[index + 1];
       if (next && !prefetched.has(index + 1)) {
-        prefetched.set(
-          index + 1,
-          fetchChunk(next, rate, controllers).catch(() => {
-            prefetched.delete(index + 1);
-            throw new Error("prefetch failed");
-          }),
-        );
+        prefetched.set(index + 1, fetchChunk(next, rate, controllers));
       }
     } catch (err) {
       if (stopped) return;
